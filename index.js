@@ -53,7 +53,7 @@ app.post('/register', async (req, res) => {
 });
 
 // Route สำหรับการ Login
-app.post('/login', (req, res) => {
+app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
     if (!username || !password) {
@@ -72,18 +72,182 @@ app.post('/login', (req, res) => {
         }
 
         const user = results[0];
-        const isPasswordMatch = await bcrypt.compare(password, user.password);
+        try {
+            if (await bcrypt.compare(password, user.password)) {
+                res.send({
+                    user_id: user.user_id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role,
+                    firstname : user.firstname,
+                    lastname : user.lastname,
+                    phone : user.phone,
+                    student_id : user.student_id,
+                });
+            } else {
+                // res.status(401).send('Invalid username or password');
+                //ส่งข้อความว่า username หรือ password ไม่ถูกต้อง
+                res.status(401).send('Invalid username or password');
+            }
+        } catch (error) {
+            console.error('Error checking password:', error);
+            res.status(500).send('Error processing login');
+        }
+    });
+});
 
-        if (!isPasswordMatch) {
-            return res.status(401).send('Invalid username or password');
+// Route สำหรับการดึงข้อมูลผู้ใช้ทั้งหมด
+app.get('/users', (req, res) => {
+    const query = 'SELECT user_id, username FROM users';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error querying users:', err);
+            return res.status(500).send('Error querying users');
+        }
+        res.send(results);
+    });
+});
+
+// Route สำหรับการดึงข้อมูลผู้ใช้จาก id
+app.get('/users/:id', (req, res) => {
+    const query = 'SELECT user_id, username FROM users WHERE user_id = ?';
+    db.query(query, [req.params.id], (err, results) => {
+        if (err) {
+            console.error('Error querying user:', err);
+            return res.status(500).send('Error querying user');
         }
 
-        res.send('Login successful');
+        if (results.length === 0) {
+            return res.status(404).send('User not found');
+        }
+
+        res.send(results[0]);
     });
+});
+
+// Route สำหรับการอัปเดตข้อมูลผู้ใช้
+app.put('/users/edit/:id', (req, res) => {
+    const { username } = req.body;
+
+    if (!username) {
+        return res.status(400).send('Username is required');
+    }
+
+    const query = 'UPDATE users SET username = ? WHERE user_id = ?';
+    db.query(query, [username, req.params.id], (err, result) => {
+        if (err) {
+            console.error('Error updating user:', err);
+            return res.status(500).send('Error updating user');
+        }
+
+        res.send('User updated successfully');
+    });
+});
+
+// Route สำหรับการจองโต๊ะ
+app.post('/reservations', (req, res) => {
+    const { user_id, table_id, reservation_date, duration } = req.body;
+
+    if (!user_id || !table_id || !reservation_date || !duration) {
+        return res.status(400).send('User ID, Table ID, Reservation Date, and Duration are required');
+    }
+
+    const checkTableQuery = 'SELECT * FROM tables WHERE table_id = ? AND status = "available"';
+    db.query(checkTableQuery, [table_id], (err, results) => {
+        if (err) {
+            console.error('Error checking table status:', err);
+            return res.status(500).send('Error checking table status');
+        }
+
+        if (results.length === 0) {
+            return res.status(400).send('Table is not available');
+        }
+
+        const insertReservationQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, duration) VALUES (?, ?, ?, ?)';
+        db.query(insertReservationQuery, [user_id, table_id, reservation_date, duration], (err, result) => {
+            if (err) {
+                console.error('Error inserting reservation:', err);
+                return res.status(500).send('Error making reservation');
+            }
+
+            const updateTableQuery = 'UPDATE tables SET status = "reserved" WHERE table_id = ?';
+            db.query(updateTableQuery, [table_id], (err) => {
+                if (err) {
+                    console.error('Error updating table status:', err);
+                    return res.status(500).send('Error updating table status');
+                }
+                res.send('Table reserved successfully');
+            });
+        });
+    });
+});
+
+// Route สำหรับการยกเลิกการจอง
+app.delete('/reservations/:id', (req, res) => {
+    const reservationId = req.params.id;
+
+    const query = 'SELECT * FROM reservations WHERE reservation_id = ?';
+    db.query(query, [reservationId], (err, results) => {
+        if (err) {
+            console.error('Error querying reservation:', err);
+            return res.status(500).send('Error querying reservation');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('Reservation not found');
+        }
+
+        const deleteReservationQuery = 'DELETE FROM reservations WHERE reservation_id = ?';
+        db.query(deleteReservationQuery, [reservationId], (err) => {
+            if (err) {
+                console.error('Error deleting reservation:', err);
+                return res.status(500).send('Error deleting reservation');
+            }
+
+            const tableId = results[0].table_id;
+            const updateTableQuery = 'UPDATE tables SET status = "available" WHERE table_id = ?';
+            db.query(updateTableQuery, [tableId], (err) => {
+                if (err) {
+                    console.error('Error updating table status:', err);
+                    return res.status(500).send('Error updating table status');
+                }
+                res.send('Reservation cancelled successfully');
+            });
+        });
+    });
+});
+
+// Route สำหรับการดูประวัติการจองของผู้ใช้
+app.get('/users/:id/reservations', (req, res) => {
+    const userId = req.params.id;
+
+    const query = `
+        SELECT r.reservation_id, r.table_id, r.reservation_date, r.duration, r.status 
+        FROM reservations r 
+        WHERE r.user_id = ?`;
+    
+    db.query(query, [userId], (err, results) => {
+        if (err) {
+            console.error('Error querying reservations:', err);
+            return res.status(500).send('Error querying reservations');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('No reservations found for this user');
+        }
+
+        res.send(results);
+    });
+});
+
+// Middleware สำหรับจัดการข้อผิดพลาดทั่วไป
+app.use((err, req, res, next) => {
+    console.error(err.stack);
+    res.status(500).send('Something broke!');
 });
 
     
 // เริ่มต้นเซิร์ฟเวอร์
 app.listen(process.env.PORT || PORT, () => {
-    console.log(`Server is running on port ${PORT}`);
+    console.log(`Server is running `);
 });
