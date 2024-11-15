@@ -5,7 +5,10 @@ const cors = require('cors'); // เพิ่ม CORS
 const app = express();
 require('dotenv').config();
 
-const PORT =  8080;
+const jwt = require('jsonwebtoken');
+
+
+const PORT = 8080;
 
 const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
@@ -14,6 +17,9 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 // ตรวจสอบการเชื่อมต่อ
 
 // const db = mysql.createConnection(process.env.DATABASE_URL);
+
+app.use(cors()); // เปิดใช้งาน CORS
+app.use(express.json());
 
 const db = mysql.createConnection({
     host: 'localhost',
@@ -33,8 +39,7 @@ db.connect((err) => {
 
 
 // Middleware สำหรับอ่าน JSON จาก body request
-app.use(cors()); // เปิดใช้งาน CORS
-app.use(express.json());
+
 
 // Route พื้นฐาน
 app.get('/', (req, res) => {
@@ -43,16 +48,16 @@ app.get('/', (req, res) => {
 
 // Route สำหรับการ Register
 app.post('/register', async (req, res) => {
-    const { username, password } = req.body;
+    const { email, password } = req.body;
 
-    if (!username || !password) {
+    if (!email || !password) {
         return res.status(400).send('Username and password are required');
     }
 
     try {
         const hashedPassword = await bcrypt.hash(password, 10);
-        const query = 'INSERT INTO users (username, password) VALUES (?, ?)';
-        db.query(query, [username, hashedPassword], (err, result) => {
+        const query = 'INSERT INTO users (email, password) VALUES (?, ?)';
+        db.query(query, [email, hashedPassword], (err, result) => {
             if (err) {
                 console.error('Error inserting user:', err);
                 return res.status(500).send('Error saving user');
@@ -65,106 +70,23 @@ app.post('/register', async (req, res) => {
     }
 });
 
-// Route สำหรับการ Login ด้วย username และ password
-app.post('/login', async (req, res) => {
-    const { username, password } = req.body;
 
-    if (!username || !password) {
-        return res.status(400).send('Username and password are required');
-    }
 
-    const query = 'SELECT * FROM users WHERE username = ?';
-    db.query(query, [username], async (err, results) => {
-        if (err) {
-            console.error('Error querying user:', err);
-            return res.status(500).send('Error querying user');
-        }
-
-        if (results.length === 0) {
-            return res.status(401).send('Invalid username or password');
-        }
-
-        const user = results[0];
-        try {
-            if (await bcrypt.compare(password, user.password)) {
-                res.send({
-                    user_id: user.user_id,
-                    username: user.username,
-                    email: user.email,
-                    role: user.role,
-                    firstname : user.firstname,
-                    lastname : user.lastname,
-                    phone : user.phone,
-                    student_id : user.student_id,
-                });
-            } else {
-                // res.status(401).send('Invalid username or password');
-                //ส่งข้อความว่า username หรือ password ไม่ถูกต้อง
-                res.status(401).send('Invalid username or password');
-            }
-        } catch (error) {
-            console.error('Error checking password:', error);
-            res.status(500).send('Error processing login');
-        }
-    });
-});
-
-// Route สำหรับการ Login ด้วย email
-app.post('/login/email', async (req, res) => {
-    const { email, password } = req.body;
-
-    if (!email || !password) {
-        return res.status(400).send('Email and password are required');
-    }
-
-    const query = 'SELECT * FROM users WHERE email = ?';
-    db.query(query, [email], async (err, results) => {
-        if (err) {
-            console.error('Error querying user:', err);
-            return res.status(500).send('Error querying user');
-        }
-
-        if (results.length === 0) {
-            return res.status(401).send('Invalid email or password');
-        }
-
-        const user = results[0];
-        try {
-            if (await bcrypt.compare(password, user.password)) {
-                res.send({
-                    user_id: user.user_id,
-                    username: user.username,
-                    email: user.email,
-                    role: user.role,
-                    firstname : user.firstname,
-                    lastname : user.lastname,
-                    phone : user.phone,
-                    student_id : user.student_id,
-                });
-            } else {
-                res.status(401).send('Invalid email or password');
-            }
-        } catch (error) {
-            console.error('Error checking password:', error);
-            res.status(500).send('Error processing login');
-        }
-    });
-});
 
 
 
 app.post('/api/login', (req, res) => {
     const { email } = req.body;
-  
+
     // ตรวจสอบว่าอีเมลมาจากโดเมน @rsu.ac.th
     if (email.endsWith('@rsu.ac.th')) {
-      // ส่ง response ที่บอกว่าผู้ใช้สามารถล็อกอินได้
-      res.json({ success: true });
+        // ส่ง response ที่บอกว่าผู้ใช้สามารถล็อกอินได้
+        res.json({ success: true });
     } else {
-      // ถ้าไม่ใช่โดเมนที่อนุญาต
-      res.json({ success: false, message: 'Only @rsu.ac.th emails are allowed.' });
+        // ถ้าไม่ใช่โดเมนที่อนุญาต
+        res.json({ success: false, message: 'Only @rsu.ac.th emails are allowed.' });
     }
-  });
+});
 
 
 
@@ -198,9 +120,28 @@ app.get('/users/:id', (req, res) => {
     });
 });
 
+// Route สำหรับการดึงข้อมูลผู้ใช้จาก email
+app.get('/users/email/:email', (req, res) => {
+    const query = 'SELECT * FROM users WHERE email = ?';
+    db.query(query, [req.params.email], (err, results) => {
+        if (err) {
+            console.error('Error querying user:', err);
+            return res.status(500).send('Error querying user');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('User not found');
+        }
+
+        res.send(results[0]);
+    });
+});
+
 // Route สำหรับการอัปเดตข้อมูลผู้ใช้
 app.put('/users/edit/:id', (req, res) => {
     const { username } = req.body;
+
+    //เอาค่าที่อยู่ใน lo
 
     if (!username) {
         return res.status(400).send('Username is required');
@@ -298,7 +239,7 @@ app.get('/users/:id/reservations', (req, res) => {
         SELECT r.reservation_id, r.table_id, r.reservation_date, r.duration, r.status 
         FROM reservations r 
         WHERE r.user_id = ?`;
-    
+
     db.query(query, [userId], (err, results) => {
         if (err) {
             console.error('Error querying reservations:', err);
@@ -318,15 +259,15 @@ app.get('/tables', (req, res) => {
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error querying tables:', err);
-            res.status(500).json({ 
+            res.status(500).json({
                 message: 'Error querying tables',
-                error: err.message 
+                error: err.message
             });
             return;
         }
 
         if (!results || results.length === 0) {
-            res.status(404).json({ 
+            res.status(404).json({
                 message: 'No tables found'
             });
             return;
@@ -340,6 +281,28 @@ app.get('/tables', (req, res) => {
 
 
 
+// Middleware สำหรับตรวจสอบ JWT
+const verifyToken = (req, res, next) => {
+    const token = req.headers['authorization']?.split(' ')[1]; // ดึง token จาก header
+    if (!token) {
+        return res.status(403).send('Token is required');
+    }
+
+    // ตรวจสอบ token ว่าถูกต้องหรือไม่
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).send('Invalid or expired token');
+        }
+        req.user = decoded; // เพิ่มข้อมูล decoded ลงใน request
+        next();
+    });
+};
+
+// Route สำหรับตรวจสอบ token
+app.get('/verifyToken', verifyToken, (req, res) => {
+    res.status(200).send('Token is valid');
+});
+
 // Route สำหรับการล็อกอินด้วย Google
 app.post('/api/auth/google', async (req, res) => {
     const { token } = req.body;
@@ -350,46 +313,120 @@ app.post('/api/auth/google', async (req, res) => {
             audience: process.env.GOOGLE_CLIENT_ID,
         });
 
-        console.log('Ticket:', ticket);
         const payload = ticket.getPayload();
-        console.log(payload);  // เพิ่มการพิมพ์ข้อมูล payload เพื่อตรวจสอบว่ามีข้อมูลที่ถูกต้อง
         const email = payload.email;
 
         if (email.endsWith('@rsu.ac.th')) {
-            // เช็คว่าอีเมลนี้มีอยู่ในฐานข้อมูลหรือไม่
             const query = 'SELECT * FROM users WHERE email = ?';
             db.query(query, [email], (err, results) => {
                 if (err) {
-                    console.error('Error querying user:', err);
                     return res.status(500).json({ message: 'Error checking user', error: err.message });
                 }
 
                 if (results.length === 0) {
-                    // ถ้าไม่พบผู้ใช้ในฐานข้อมูล ให้เพิ่มข้อมูลผู้ใช้ใหม่
-                    const username = payload.name || email.split('@')[0]; // ใช้ชื่อจริงหรือส่วนของอีเมลก่อนเครื่องหมาย @ เป็น username
+                    const username = payload.name || email.split('@')[0];
                     const insertQuery = 'INSERT INTO users (email, username, first_name, last_name) VALUES (?, ?, ?, ?)';
                     db.query(insertQuery, [email, username, payload.given_name, payload.family_name], (err, result) => {
                         if (err) {
-                            console.error('Error inserting user:', err);
                             return res.status(500).json({ message: 'Error saving user', error: err.message });
                         }
                         res.status(200).json({ message: 'User created and login successful' });
                     });
                 } else {
-                    // ถ้ามีผู้ใช้ในฐานข้อมูลแล้ว ให้ล็อกอิน
-                    res.status(200).json({ message: 'Login successful' });
+                    const user = results[0];
+                    const token = jwt.sign(
+                        { user_id: user.user_id, email: user.email, role: user.role },
+                        process.env.JWT_SECRET,
+                        { expiresIn: '1h' }
+                    );
+                    res.json({
+                        user_id: user.user_id,
+                        email: user.email,
+                        role: user.role,
+                        token,
+                        message: 'Login successful'
+                    });
                 }
             });
         } else {
             res.status(403).json({ message: 'Invalid email domain' });
         }
     } catch (error) {
-        console.error('Error verifying token:', error);
         res.status(401).json({ message: 'Invalid token', error: error.message });
     }
 });
 
-  
+// Route สำหรับการ Login ด้วย email
+app.post('/login/email', async (req, res) => {
+    const { email, password } = req.body;
+    if (!email || !password) {
+        return res.status(400).send('Email and password are required');
+    }
+
+    const emailDomain = email.split('@')[1];
+    if (emailDomain !== 'rsu.ac.th') {
+        return res.status(401).send('Invalid email domain. Please use an RSU email.');
+    }
+
+    const query = 'SELECT * FROM users WHERE email = ?';
+    db.query(query, [email], async (err, results) => {
+        if (err) {
+            return res.status(500).send('Error querying user');
+        }
+
+        if (results.length === 0) {
+            return res.status(401).send('Invalid email or password');
+        }
+
+        const user = results[0];
+        try {
+            if (await bcrypt.compare(password, user.password)) {
+                const token = jwt.sign(
+                    { user_id: user.user_id, email: user.email, role: user.role },
+                    process.env.JWT_SECRET,
+                    { expiresIn: '1h' }
+                );
+
+                res.send({
+                    user_id: user.user_id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role,
+                    firstname: user.firstname,
+                    lastname: user.lastname,
+                    token,
+                });
+            } else {
+                res.status(401).send('Invalid email or password');
+            }
+        } catch (error) {
+            res.status(500).send('Error processing login');
+        }
+    });
+});
+
+//route สำหรับการด๔การจองทั้งหมด
+app.get('/reservationsall', (req, res) => {
+    const query = `SELECT * FROM reservations 
+                    JOIN tables ON reservations.table_id = tables.table_id
+                    JOIN users ON reservations.user_id = users.user_id
+                    WHERE reservations.reservation_date >= CURDATE();
+    `;
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error querying reservations:', err);
+            return res.status(500).send('Error querying reservations');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('No reservations found');
+        }
+
+        res.send(results);
+    });
+});
+
+
 
 
 // Middleware สำหรับจัดการข้อผิดพลาดทั่วไป
@@ -412,7 +449,7 @@ app.use((req, res, next) => {
     next();
 });
 
-    
+
 // เริ่มต้นเซิร์ฟเวอร์
 app.listen(process.env.PORT || PORT, () => {
     console.log(`Server is running `);
