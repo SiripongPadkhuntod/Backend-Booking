@@ -3,6 +3,7 @@ const mysql = require('mysql');
 const bcrypt = require('bcrypt');
 const cors = require('cors'); // เพิ่ม CORS
 const app = express();
+require('dotenv').config();
 
 const PORT =  8080;
 
@@ -95,6 +96,38 @@ app.post('/login', async (req, res) => {
         }
     });
 });
+
+app.post('/api/login', (req, res) => {
+    const { email } = req.body;
+  
+    // ตรวจสอบว่าอีเมลมาจากโดเมน @rsu.ac.th
+    if (email.endsWith('@rsu.ac.th')) {
+      // ส่ง response ที่บอกว่าผู้ใช้สามารถล็อกอินได้
+      res.json({ success: true });
+    } else {
+      // ถ้าไม่ใช่โดเมนที่อนุญาต
+      res.json({ success: false, message: 'Only @rsu.ac.th emails are allowed.' });
+    }
+  });
+
+
+// Route สำหรับการ Login ด้วย google
+app.post('/login/google', async (req, res) => {
+    const { email } = req.body;
+
+    if (!email) {
+        return res.status(400).send('Email is required');
+    }
+
+    if (email.endsWith('@rsu.ac.th')) {
+        res.send('Login successful');
+    } else {
+        res.status(401).send('Only @rsu.ac.th emails are allowed');
+    }
+});
+
+
+
 
 // Route สำหรับการดึงข้อมูลผู้ใช้ทั้งหมด
 app.get('/users', (req, res) => {
