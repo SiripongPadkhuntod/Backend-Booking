@@ -7,9 +7,21 @@ require('dotenv').config();
 
 const PORT =  8080;
 
+const { OAuth2Client } = require('google-auth-library');
+const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
 
 // ตรวจสอบการเชื่อมต่อ
-const db = mysql.createConnection(process.env.DATABASE_URL);
+
+// const db = mysql.createConnection(process.env.DATABASE_URL);
+
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'root',
+    password: '',
+    database: 'bookingweb',
+    port: 3306
+});
 
 db.connect((err) => {
     if (err) {
@@ -53,7 +65,7 @@ app.post('/register', async (req, res) => {
     }
 });
 
-// Route สำหรับการ Login
+// Route สำหรับการ Login ด้วย username และ password
 app.post('/login', async (req, res) => {
     const { username, password } = req.body;
 
@@ -97,6 +109,50 @@ app.post('/login', async (req, res) => {
     });
 });
 
+// Route สำหรับการ Login ด้วย email
+app.post('/login/email', async (req, res) => {
+    const { email, password } = req.body;
+
+    if (!email || !password) {
+        return res.status(400).send('Email and password are required');
+    }
+
+    const query = 'SELECT * FROM users WHERE email = ?';
+    db.query(query, [email], async (err, results) => {
+        if (err) {
+            console.error('Error querying user:', err);
+            return res.status(500).send('Error querying user');
+        }
+
+        if (results.length === 0) {
+            return res.status(401).send('Invalid email or password');
+        }
+
+        const user = results[0];
+        try {
+            if (await bcrypt.compare(password, user.password)) {
+                res.send({
+                    user_id: user.user_id,
+                    username: user.username,
+                    email: user.email,
+                    role: user.role,
+                    firstname : user.firstname,
+                    lastname : user.lastname,
+                    phone : user.phone,
+                    student_id : user.student_id,
+                });
+            } else {
+                res.status(401).send('Invalid email or password');
+            }
+        } catch (error) {
+            console.error('Error checking password:', error);
+            res.status(500).send('Error processing login');
+        }
+    });
+});
+
+
+
 app.post('/api/login', (req, res) => {
     const { email } = req.body;
   
@@ -109,22 +165,6 @@ app.post('/api/login', (req, res) => {
       res.json({ success: false, message: 'Only @rsu.ac.th emails are allowed.' });
     }
   });
-
-
-// Route สำหรับการ Login ด้วย google
-app.post('/login/google', async (req, res) => {
-    const { email } = req.body;
-
-    if (!email) {
-        return res.status(400).send('Email is required');
-    }
-
-    if (email.endsWith('@rsu.ac.th')) {
-        res.send('Login successful');
-    } else {
-        res.status(401).send('Only @rsu.ac.th emails are allowed');
-    }
-});
 
 
 
@@ -273,10 +313,103 @@ app.get('/users/:id/reservations', (req, res) => {
     });
 });
 
+app.get('/tables', (req, res) => {
+    const query = 'SELECT * FROM tables';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error querying tables:', err);
+            res.status(500).json({ 
+                message: 'Error querying tables',
+                error: err.message 
+            });
+            return;
+        }
+
+        if (!results || results.length === 0) {
+            res.status(404).json({ 
+                message: 'No tables found'
+            });
+            return;
+        }
+
+        res.setHeader('Content-Type', 'application/json');
+        res.json(results);
+    });
+});
+
+
+
+
+// Route สำหรับการล็อกอินด้วย Google
+app.post('/api/auth/google', async (req, res) => {
+    const { token } = req.body;
+
+    try {
+        const ticket = await client.verifyIdToken({
+            idToken: token,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
+
+        console.log('Ticket:', ticket);
+        const payload = ticket.getPayload();
+        console.log(payload);  // เพิ่มการพิมพ์ข้อมูล payload เพื่อตรวจสอบว่ามีข้อมูลที่ถูกต้อง
+        const email = payload.email;
+
+        if (email.endsWith('@rsu.ac.th')) {
+            // เช็คว่าอีเมลนี้มีอยู่ในฐานข้อมูลหรือไม่
+            const query = 'SELECT * FROM users WHERE email = ?';
+            db.query(query, [email], (err, results) => {
+                if (err) {
+                    console.error('Error querying user:', err);
+                    return res.status(500).json({ message: 'Error checking user', error: err.message });
+                }
+
+                if (results.length === 0) {
+                    // ถ้าไม่พบผู้ใช้ในฐานข้อมูล ให้เพิ่มข้อมูลผู้ใช้ใหม่
+                    const username = payload.name || email.split('@')[0]; // ใช้ชื่อจริงหรือส่วนของอีเมลก่อนเครื่องหมาย @ เป็น username
+                    const insertQuery = 'INSERT INTO users (email, username, first_name, last_name) VALUES (?, ?, ?, ?)';
+                    db.query(insertQuery, [email, username, payload.given_name, payload.family_name], (err, result) => {
+                        if (err) {
+                            console.error('Error inserting user:', err);
+                            return res.status(500).json({ message: 'Error saving user', error: err.message });
+                        }
+                        res.status(200).json({ message: 'User created and login successful' });
+                    });
+                } else {
+                    // ถ้ามีผู้ใช้ในฐานข้อมูลแล้ว ให้ล็อกอิน
+                    res.status(200).json({ message: 'Login successful' });
+                }
+            });
+        } else {
+            res.status(403).json({ message: 'Invalid email domain' });
+        }
+    } catch (error) {
+        console.error('Error verifying token:', error);
+        res.status(401).json({ message: 'Invalid token', error: error.message });
+    }
+});
+
+  
+
+
 // Middleware สำหรับจัดการข้อผิดพลาดทั่วไป
 app.use((err, req, res, next) => {
     console.error(err.stack);
     res.status(500).send('Something broke!');
+});
+
+// CORS and COOP/COEP settings
+app.use(cors({
+    origin: 'http://localhost:5173', // URL ของ frontend
+    methods: 'GET,POST',
+    allowedHeaders: 'Content-Type,Authorization'
+}));
+
+// ตั้งค่า COOP และ COEP
+app.use((req, res, next) => {
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
+    next();
 });
 
     
