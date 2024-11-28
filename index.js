@@ -8,26 +8,18 @@ require('dotenv').config();
 const jwt = require('jsonwebtoken');
 
 
-const PORT = 8080;
+const PORT = 3000;
 
 const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
-// ตรวจสอบการเชื่อมต่อ
-
-// const db = mysql.createConnection(process.env.DATABASE_URL);
-
 app.use(cors()); // เปิดใช้งาน CORS
 app.use(express.json());
 
-const db = mysql.createConnection({
-    host: 'localhost',
-    user: 'root',
-    password: '',
-    database: 'bookingweb',
-    port: 3306
-});
+
+
+const db = mysql.createConnection(process.env.DATABASE_URL2);
 
 db.connect((err) => {
     if (err) {
@@ -254,6 +246,34 @@ app.get('/users/:id/reservations', (req, res) => {
     });
 });
 
+// Route สำหรับการดึงข้อมูลโต๊ะของเดือนนั้นๆ
+app.get('/tables/:year/:month', (req, res) => {
+    const { year, month } = req.params;
+
+    const query = `
+        SELECT t.table_id, t.table_name, t.status, r.reservation_date, r.duration, u.username 
+        FROM tables t 
+        LEFT JOIN reservations r ON t.table_id = r.table_id 
+        LEFT JOIN users u ON r.user_id = u.user_id 
+        WHERE MONTH(r.reservation_date) = ? AND YEAR(r.reservation_date) = ?
+    `;
+
+    db.query(query, [month, year], (err, results) => {
+        if (err) {
+            console.error('Error querying tables:', err);
+            return res.status(500).send('Error querying tables');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('No tables found for this month');
+        }
+
+        res.send(results);
+    });
+});
+
+
+
 app.get('/tables', (req, res) => {
     const query = 'SELECT * FROM tables';
     db.query(query, (err, results) => {
@@ -296,12 +316,15 @@ const verifyToken = (req, res, next) => {
         req.user = decoded; // เพิ่มข้อมูล decoded ลงใน request
         next();
     });
+
+    return next();
 };
 
 // Route สำหรับตรวจสอบ token
-app.get('/verifyToken', verifyToken, (req, res) => {
-    res.status(200).send('Token is valid');
+app.post('/verifyToken', verifyToken, (req, res) => {
+    res.json({ status: "ok", user: req.user });
 });
+
 
 // Route สำหรับการล็อกอินด้วย Google
 app.post('/api/auth/google', async (req, res) => {
@@ -426,6 +449,28 @@ app.get('/reservationsall', (req, res) => {
     });
 });
 
+//route สำหรับการดึงข้อมูลการจองจาก เดือน
+app.get('/reservations/:month', (req, res) => {
+    const { month } = req.params;
+    const query = `SELECT * FROM reservations 
+                    JOIN tables ON reservations.table_id = tables.table_id
+                    JOIN users ON reservations.user_id = users.user_id
+                    WHERE DATE_FORMAT(reservations.reservation_date, '%Y-%m') = ?
+    `;
+    db.query(query, [month], (err, results) => {
+        if (err) {
+            console.error('Error querying reservations:', err);
+            return res.status(500).send('Error querying reservations');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('No reservations found');
+        }
+
+        res.send(results);
+    });
+});
+
 
 
 
@@ -448,7 +493,6 @@ app.use((req, res, next) => {
     res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
     next();
 });
-
 
 // เริ่มต้นเซิร์ฟเวอร์
 app.listen(process.env.PORT || PORT, () => {
