@@ -376,11 +376,11 @@ app.post('/login/email', async (req, res) => {
     const query = 'SELECT * FROM users WHERE email = ?';
     db.query(query, [email], async (err, results) => {
         if (err) {
-            return res.status(500).send('Error querying user');
+            return res.status(500).send('Error querying user' + err);
         }
 
         if (results.length === 0) {
-            return res.status(401).send('Invalid email or password');
+            return res.status(401).send('Invalid email or password' );
         }
 
         const user = results[0];
@@ -405,7 +405,7 @@ app.post('/login/email', async (req, res) => {
                 res.status(401).send('Invalid email or password');
             }
         } catch (error) {
-            res.status(500).send('Error processing login');
+            res.status(500).send('Error processing login' + error);
         }
     });
 });
