@@ -14,6 +14,10 @@ const { OAuth2Client } = require('google-auth-library');
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 
+// ตรวจสอบการเชื่อมต่อ
+
+// const db = mysql.createConnection(process.env.DATABASE_URL);
+
 app.use(cors()); // เปิดใช้งาน CORS
 app.use(express.json());
 
@@ -38,35 +42,7 @@ app.get('/', (req, res) => {
     res.send('Hello, Express!');
 });
 
-// Route สำหรับการ Register
-app.post('/register', async (req, res) => {
-    const { email, password } = req.body;
 
-    // ตรวจสอบว่า email และ password ถูกส่งมาหรือไม่
-    if (!email || !password) {
-        return res.status(400).send('Username and password are required');
-    }
-
-    try {
-        // แฮชรหัสผ่าน
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // คำสั่ง SQL สำหรับบันทึกข้อมูล
-        const query = 'INSERT INTO users (email, password) VALUES (?, ?)';
-        
-        // บันทึกข้อมูลลงในฐานข้อมูล
-        db.query(query, [email, hashedPassword], (err, result) => {
-            if (err) {
-                console.error('Error inserting user:', err.message);  // ล็อกข้อผิดพลาดที่ละเอียดขึ้น
-                return res.status(500).send('Error saving user');
-            }
-            res.send('User registered successfully');
-        });
-    } catch (error) {
-        console.error('Error hashing password:', error);  // ล็อกข้อผิดพลาดจาก bcrypt
-        res.status(500).send('Error processing registration');
-    }
-});
 
 
 
@@ -476,6 +452,42 @@ app.get('/reservations/:month', (req, res) => {
         res.send(results);
     });
 });
+
+//Route Register 
+app.post('/register', async (req, res) => {
+    const {email, password} = req.body;
+    if (!email || !password ) {
+        return res.status(400).send('All fields are required');
+    }
+
+    if (!email.endsWith('@rsu.ac.th')) {
+        return res.status(400).send('Please use an RSU email');
+    }
+
+    const checkEmailQuery = 'SELECT * FROM users WHERE email = ?';
+    db.query(checkEmailQuery, [email], async (err, results) => {
+        if (err) {
+            return res.status(500).send('Error checking email');
+        }
+
+        if (results.length > 0) {
+            return res.status(400).send('Email already exists');
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const insertQuery = 'INSERT INTO users (email, password) VALUES (?, ?)';
+        db.query(insertQuery, [email, hashedPassword], (err, result) => {
+            if (err) {
+                return res.status(500).send('Error registering user' + err);
+            }
+
+            res.send('User registered successfully');
+        });
+    });
+});
+
+//json สำหรับเทส register
+
 
 
 
