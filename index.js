@@ -42,24 +42,62 @@ app.get('/', (req, res) => {
     res.send('Hello, Express!');
 });
 
-
-
-
-
-
-
-
-app.post('/api/login', (req, res) => {
-    const { email } = req.body;
-
-    // ตรวจสอบว่าอีเมลมาจากโดเมน @rsu.ac.th
-    if (email.endsWith('@rsu.ac.th')) {
-        // ส่ง response ที่บอกว่าผู้ใช้สามารถล็อกอินได้
-        res.json({ success: true });
-    } else {
-        // ถ้าไม่ใช่โดเมนที่อนุญาต
-        res.json({ success: false, message: 'Only @rsu.ac.th emails are allowed.' });
+//Route Register 
+app.post('/register', async (req, res) => {
+    const {email, password} = req.body;
+    if (!email || !password ) {
+        return res.status(400).send('All fields are required');
     }
+
+    if (!email.endsWith('@rsu.ac.th')) {
+        return res.status(400).send('Please use an RSU email');
+    }
+
+    const checkEmailQuery = 'SELECT * FROM users WHERE email = ?';
+    db.query(checkEmailQuery, [email], async (err, results) => {
+        if (err) {
+            return res.status(500).send('Error checking email');
+        }
+
+        if (results.length > 0) {
+            return res.status(400).send('Email already exists');
+        }
+
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const insertQuery = 'INSERT INTO users (email, password) VALUES (?, ?)';
+        db.query(insertQuery, [email, hashedPassword], (err, result) => {
+            if (err) {
+                return res.status(500).send('Error registering user' + err);
+            }
+
+            res.send({
+                status:200,
+                data:"User registered successfully"
+            });
+        });
+    });
+});
+
+
+//Route Edit UserData 
+app.put('/editprofile', (req, res) => {
+    const { email, first_name, last_name, phonenumber, student_id, department } = req.body; // แก้ stdent_id เป็น student_id
+    if (!email || !first_name || !last_name || !phonenumber || !student_id || !department) {
+        return res.status(400).send('All fields are required');
+    }
+
+    const query = 'UPDATE users SET first_name = ?, last_name = ?, phonenumber = ?, student_id = ?, department = ? WHERE email = ?';
+    db.query(query, [first_name, last_name, phonenumber, student_id, department, email], (err, result) => {
+        if (err) {
+            return res.status(500).send('Error updating user' + err);
+        }
+
+        res.status(200).send({
+            status:200,
+            data: "Update complete",
+            user: email
+        });
+    });
 });
 
 
@@ -77,22 +115,6 @@ app.get('/users', (req, res) => {
     });
 });
 
-// Route สำหรับการดึงข้อมูลผู้ใช้จาก id
-app.get('/users/:id', (req, res) => {
-    const query = 'SELECT user_id, username FROM users WHERE user_id = ?';
-    db.query(query, [req.params.id], (err, results) => {
-        if (err) {
-            console.error('Error querying user:', err);
-            return res.status(500).send('Error querying user');
-        }
-
-        if (results.length === 0) {
-            return res.status(404).send('User not found');
-        }
-
-        res.send(results[0]);
-    });
-});
 
 // Route สำหรับการดึงข้อมูลผู้ใช้จาก email
 app.get('/users/email/:email', (req, res) => {
@@ -111,26 +133,7 @@ app.get('/users/email/:email', (req, res) => {
     });
 });
 
-// Route สำหรับการอัปเดตข้อมูลผู้ใช้
-app.put('/users/edit/:id', (req, res) => {
-    const { username } = req.body;
 
-    //เอาค่าที่อยู่ใน lo
-
-    if (!username) {
-        return res.status(400).send('Username is required');
-    }
-
-    const query = 'UPDATE users SET username = ? WHERE user_id = ?';
-    db.query(query, [username, req.params.id], (err, result) => {
-        if (err) {
-            console.error('Error updating user:', err);
-            return res.status(500).send('Error updating user');
-        }
-
-        res.send('User updated successfully');
-    });
-});
 
 // Route สำหรับการจองโต๊ะ
 app.post('/reservations', (req, res) => {
@@ -205,80 +208,6 @@ app.delete('/reservations/:id', (req, res) => {
     });
 });
 
-// Route สำหรับการดูประวัติการจองของผู้ใช้
-app.get('/users/:id/reservations', (req, res) => {
-    const userId = req.params.id;
-
-    const query = `
-        SELECT r.reservation_id, r.table_id, r.reservation_date, r.duration, r.status 
-        FROM reservations r 
-        WHERE r.user_id = ?`;
-
-    db.query(query, [userId], (err, results) => {
-        if (err) {
-            console.error('Error querying reservations:', err);
-            return res.status(500).send('Error querying reservations');
-        }
-
-        if (results.length === 0) {
-            return res.status(404).send('No reservations found for this user');
-        }
-
-        res.send(results);
-    });
-});
-
-// Route สำหรับการดึงข้อมูลโต๊ะของเดือนนั้นๆ
-app.get('/tables/:year/:month', (req, res) => {
-    const { year, month } = req.params;
-
-    const query = `
-        SELECT t.table_id, t.table_name, t.status, r.reservation_date, r.duration, u.username 
-        FROM tables t 
-        LEFT JOIN reservations r ON t.table_id = r.table_id 
-        LEFT JOIN users u ON r.user_id = u.user_id 
-        WHERE MONTH(r.reservation_date) = ? AND YEAR(r.reservation_date) = ?
-    `;
-
-    db.query(query, [month, year], (err, results) => {
-        if (err) {
-            console.error('Error querying tables:', err);
-            return res.status(500).send('Error querying tables');
-        }
-
-        if (results.length === 0) {
-            return res.status(404).send('No tables found for this month');
-        }
-
-        res.send(results);
-    });
-});
-
-
-
-app.get('/tables', (req, res) => {
-    const query = 'SELECT * FROM tables';
-    db.query(query, (err, results) => {
-        if (err) {
-            console.error('Error querying tables:', err);
-            res.status(500).json({
-                message: 'Error querying tables',
-                error: err.message
-            });
-            return;
-        }
-
-        if (!results || results.length === 0) {
-            res.status(404).json({
-                message: 'No tables found'
-            });
-            return;
-        }
-
-        res.setHeader('Content-Type', 'application/json');
-        res.json(results);
-    });
-});
 
 
 
@@ -345,6 +274,7 @@ app.post('/api/auth/google', async (req, res) => {
                         { expiresIn: '1h' }
                     );
                     res.json({
+                        status:200,
                         user_id: user.user_id,
                         email: user.email,
                         role: user.role,
@@ -410,8 +340,8 @@ app.post('/login/email', async (req, res) => {
     });
 });
 
-//route สำหรับการด๔การจองทั้งหมด
-app.get('/reservationsall', (req, res) => {
+//route สำหรับการดูการจองทั้งหมด
+app.get('/reservations/all', (req, res) => {
     const query = `SELECT * FROM reservations 
                     JOIN tables ON reservations.table_id = tables.table_id
                     JOIN users ON reservations.user_id = users.user_id
@@ -453,40 +383,28 @@ app.get('/reservations/:month', (req, res) => {
     });
 });
 
-//Route Register 
-app.post('/register', async (req, res) => {
-    const {email, password} = req.body;
-    if (!email || !password ) {
-        return res.status(400).send('All fields are required');
-    }
-
-    if (!email.endsWith('@rsu.ac.th')) {
-        return res.status(400).send('Please use an RSU email');
-    }
-
-    const checkEmailQuery = 'SELECT * FROM users WHERE email = ?';
-    db.query(checkEmailQuery, [email], async (err, results) => {
+//route สำหรับการดึงข้อมูลการจองจาก วัน
+app.get('/reservations/day/:day', (req, res) => {
+    const { day } = req.params;
+    const query = `SELECT table_number,reservation_time_from,reservation_time_to,first_name,last_name FROM reservations 
+                    JOIN tables ON reservations.table_id = tables.table_id
+                    JOIN users ON reservations.user_id = users.user_id
+                    WHERE DATE(reservations.reservation_date) = ?
+    `;
+    db.query(query, [day], (err, results) => {
         if (err) {
-            return res.status(500).send('Error checking email');
+            console.error('Error querying reservations:', err);
+            return res.status(500).send('Error querying reservations');
         }
 
-        if (results.length > 0) {
-            return res.status(400).send('Email already exists');
+        if (results.length === 0) {
+            return res.status(404).send('No reservations found');
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
-        const insertQuery = 'INSERT INTO users (email, password) VALUES (?, ?)';
-        db.query(insertQuery, [email, hashedPassword], (err, result) => {
-            if (err) {
-                return res.status(500).send('Error registering user' + err);
-            }
-
-            res.send('User registered successfully');
-        });
+        res.send(results);
     });
 });
 
-//json สำหรับเทส register
 
 
 
@@ -495,7 +413,7 @@ app.post('/register', async (req, res) => {
 // Middleware สำหรับจัดการข้อผิดพลาดทั่วไป
 app.use((err, req, res, next) => {
     console.error(err.stack);
-    res.status(500).send('Something broke!');
+    res.status(500).send('Something broke!' + err.message);
 });
 
 // CORS and COOP/COEP settings
