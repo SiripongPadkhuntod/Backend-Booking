@@ -6,6 +6,7 @@ const app = express();
 require('dotenv').config();
 
 const jwt = require('jsonwebtoken');
+const multer = require('multer');
 
 
 const PORT = 3000;
@@ -18,12 +19,33 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 // const db = mysql.createConnection(process.env.DATABASE_URL);
 
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        cb(null, 'uploads/')
+    },
+    filename: function (req, file, cb) {
+        cb(null, file.fieldname + '-' + Date.now() + Path2D.extname(file.originalname))
+    }
+})
+
+const upload = multer({ storage: storage });
+
+
+
+
 app.use(cors()); // เปิดใช้งาน CORS
 app.use(express.json());
 
 
 
-const db = mysql.createConnection(process.env.DATABASE_URL2);
+// const db = mysql.createConnection(process.env.DATABASE_URL2);
+const db = mysql.createConnection({
+    host: 'localhost',
+    user: 'root',
+    password: '',
+    database: 'bookingweb',
+    port: 3306
+});
 
 db.connect((err) => {
     if (err) {
@@ -41,6 +63,10 @@ db.connect((err) => {
 app.get('/', (req, res) => {
     res.send('Hello, Express!');
 });
+
+app.post('/upload', upload.single('file'), (req, res) => {
+    res.send('File uploaded ' + req.file.filename);
+})
 
 //Route Register 
 app.post('/register', async (req, res) => {
@@ -136,42 +162,6 @@ app.get('/users/email/:email', (req, res) => {
 
 
 // Route สำหรับการจองโต๊ะ
-app.post('/reservations', (req, res) => {
-    const { user_id, table_id, reservation_date, duration } = req.body;
-
-    if (!user_id || !table_id || !reservation_date || !duration) {
-        return res.status(400).send('User ID, Table ID, Reservation Date, and Duration are required');
-    }
-
-    const checkTableQuery = 'SELECT * FROM tables WHERE table_id = ? AND status = "available"';
-    db.query(checkTableQuery, [table_id], (err, results) => {
-        if (err) {
-            console.error('Error checking table status:', err);
-            return res.status(500).send('Error checking table status');
-        }
-
-        if (results.length === 0) {
-            return res.status(400).send('Table is not available');
-        }
-
-        const insertReservationQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, duration) VALUES (?, ?, ?, ?)';
-        db.query(insertReservationQuery, [user_id, table_id, reservation_date, duration], (err, result) => {
-            if (err) {
-                console.error('Error inserting reservation:', err);
-                return res.status(500).send('Error making reservation');
-            }
-
-            const updateTableQuery = 'UPDATE tables SET status = "reserved" WHERE table_id = ?';
-            db.query(updateTableQuery, [table_id], (err) => {
-                if (err) {
-                    console.error('Error updating table status:', err);
-                    return res.status(500).send('Error updating table status');
-                }
-                res.send('Table reserved successfully');
-            });
-        });
-    });
-});
 
 // Route สำหรับการยกเลิกการจอง
 app.delete('/reservations/:id', (req, res) => {
@@ -386,7 +376,7 @@ app.get('/reservations/:month', (req, res) => {
 //route สำหรับการดึงข้อมูลการจองจาก วัน
 app.get('/reservations/day/:day', (req, res) => {
     const { day } = req.params;
-    const query = `SELECT table_number,reservation_time_from,reservation_time_to,first_name,last_name FROM reservations 
+    const query = `SELECT table_number,reservation_time_from,reservation_time_to,first_name,last_name,reservation_date FROM reservations 
                     JOIN tables ON reservations.table_id = tables.table_id
                     JOIN users ON reservations.user_id = users.user_id
                     WHERE DATE(reservations.reservation_date) = ?
@@ -404,6 +394,71 @@ app.get('/reservations/day/:day', (req, res) => {
         res.send(results);
     });
 });
+
+//route สำหรับการจองโต๊ะ
+app.post('/reservations', (req, res) => {
+    const { user_id, table_id, reservation_date, starttime, endtime ,roomid} = req.body;
+
+    if (!user_id || !table_id || !reservation_date || !starttime || !endtime || !roomid) {
+        return res.status(400).send('All fields are required');
+    }
+
+    const checkTableQuery = 'SELECT * FROM tables WHERE table_id = ?';
+    db.query(checkTableQuery, [table_id], (err, results) => {
+        if (err) {
+            return res.status(500).send('Error checking table');
+        }
+
+        if (results.length === 0) {
+            return res.status(404).send('Table not found');
+        }
+
+        const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to,room_id) VALUES (?, ?, ?, ?, ?, ?)';
+        db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
+            if (err) {
+                return res.status(500).send('Error making reservation' + err);
+            }
+
+            res.send({
+                status:200,
+                data:"Reservation made successfully"
+            });
+
+      
+        });
+    });
+});
+
+
+//route สำหรับการดึงข้อมูลโต๊ะ 
+app.get('/tables', (req, res) => {
+    const query = 'SELECT * FROM tables';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error querying tables:', err);
+            return res.status(500).send('Error querying tables');
+        }
+        res.send({
+            status:200,
+            data:results
+        });
+    });
+});
+
+
+//route SELECT * FROM `availability` 
+app.get('/availability', (req, res) => {
+    const query = 'SELECT * FROM availability';
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error querying availability:', err);
+            return res.status(500).send('Error querying availability');
+        }
+        res.send(results);
+    });
+}); 
+
+
 
 
 
