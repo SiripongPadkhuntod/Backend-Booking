@@ -7,6 +7,9 @@ require('dotenv').config();
 
 const jwt = require('jsonwebtoken');
 const multer = require('multer');
+const Path2D = require('path');
+const fs = require('fs');
+
 
 
 const PORT = 3000;
@@ -21,12 +24,15 @@ const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
-        cb(null, 'uploads/')
+        const uploadPath = 'uploads/';
+        fs.mkdirSync(uploadPath, { recursive: true }); // สร้างโฟลเดอร์ถ้ายังไม่มี
+        cb(null, uploadPath);
     },
     filename: function (req, file, cb) {
-        cb(null, file.fieldname + '-' + Date.now() + Path2D.extname(file.originalname))
+        const ext = Path2D.extname(file.originalname);
+        cb(null, Date.now() + ext);
     }
-})
+});
 
 const upload = multer({ storage: storage });
 
@@ -65,12 +71,40 @@ app.get('/', (req, res) => {
 });
 
 app.post('/upload', upload.single('file'), (req, res) => {
-    res.send('File uploaded ' + req.file.filename);
-})
+    if (res.headersSent) return; // ป้องกันการส่ง response ซ้ำ
+    if (req.file && req.body.email) {
+        const img = req.file.filename; 
+        const email = req.body.email;
+
+        const query = 'UPDATE users SET photo = ? WHERE email = ?';
+        db.query(query, [img, email], (err, result) => {
+            if (err) {
+                if (!res.headersSent) {
+                    return res.status(500).json({ message: 'Error updating user: ' + err });
+                }
+            }
+
+            if (!res.headersSent) {
+                res.status(200).send({
+                    status: 200,
+                    data: 'Update complete',
+                    user: email
+                });
+            }
+        });
+    } else {
+        if (!res.headersSent) {
+            res.status(400).json({ message: 'No file or email provided' });
+        }
+    }
+});
+
+
+
 
 //Route Register 
 app.post('/register', async (req, res) => {
-    const {email, password} = req.body;
+    const {email, password, username, studenID, firstname, lastname } = req.body;
     if (!email || !password ) {
         return res.status(400).send('All fields are required');
     }
@@ -90,8 +124,8 @@ app.post('/register', async (req, res) => {
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
-        const insertQuery = 'INSERT INTO users (email, password) VALUES (?, ?)';
-        db.query(insertQuery, [email, hashedPassword], (err, result) => {
+        const insertQuery = 'INSERT INTO users (email, password, username, student_id, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)';
+        db.query(insertQuery, [email, hashedPassword, username, studenID, firstname, lastname], (err, result) => {
             if (err) {
                 return res.status(500).send('Error registering user' + err);
             }
@@ -238,7 +272,9 @@ app.post('/api/auth/google', async (req, res) => {
         });
 
         const payload = ticket.getPayload();
+        console.log(payload);
         const email = payload.email;
+     
 
         if (email.endsWith('@rsu.ac.th')) {
             const query = 'SELECT * FROM users WHERE email = ?';
@@ -248,9 +284,10 @@ app.post('/api/auth/google', async (req, res) => {
                 }
 
                 if (results.length === 0) {
-                    const username = payload.name || email.split('@')[0];
-                    const insertQuery = 'INSERT INTO users (email, username, first_name, last_name) VALUES (?, ?, ?, ?)';
-                    db.query(insertQuery, [email, username, payload.given_name, payload.family_name], (err, result) => {
+                    let img = "https://i.pinimg.com/736x/b9/c4/7e/b9c47ef70bff06613d397abfce02c6e7.jpg"
+                    const username = email.split('@')[0].replace('.', '');
+                    const insertQuery = 'INSERT INTO users (email, username, first_name, last_name, photo) VALUES (?, ?, ?, ?, ?)';
+                    db.query(insertQuery, [email, username, payload.given_name, payload.family_name,img], (err, result) => {
                         if (err) {
                             return res.status(500).json({ message: 'Error saving user', error: err.message });
                         }
@@ -271,6 +308,8 @@ app.post('/api/auth/google', async (req, res) => {
                         token,
                         message: 'Login successful'
                     });
+                    
+                   
                 }
             });
         } else {
@@ -477,6 +516,13 @@ app.use(cors({
     methods: 'GET,POST',
     allowedHeaders: 'Content-Type,Authorization'
 }));
+
+app.use(cors({
+    origin: '*', // หรือระบุโดเมนที่อนุญาต
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 
 // ตั้งค่า COOP และ COEP
 app.use((req, res, next) => {
