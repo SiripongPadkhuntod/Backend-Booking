@@ -10,6 +10,8 @@ const multer = require('multer');
 const Path2D = require('path');
 const fs = require('fs');
 
+const nodemailer = require('nodemailer');
+
 
 
 const PORT = 3000;
@@ -67,13 +69,13 @@ db.connect((err) => {
 
 // Route พื้นฐาน
 app.get('/', (req, res) => {
-    res.send('Hello, Express!');
+    res.send('Hello, Express! API Server is running by Stop');
 });
 
 app.post('/upload', upload.single('file'), (req, res) => {
     if (res.headersSent) return; // ป้องกันการส่ง response ซ้ำ
     if (req.file && req.body.email) {
-        const img = req.file.filename; 
+        const img = req.file.filename;
         const email = req.body.email;
 
         const query = 'UPDATE users SET photo = ? WHERE email = ?';
@@ -104,8 +106,8 @@ app.post('/upload', upload.single('file'), (req, res) => {
 
 //Route Register 
 app.post('/register', async (req, res) => {
-    const {email, password, username, studenID, firstname, lastname } = req.body;
-    if (!email || !password ) {
+    const { email, password, username, studenID, firstname, lastname } = req.body;
+    if (!email || !password) {
         return res.status(400).send('All fields are required');
     }
 
@@ -116,23 +118,32 @@ app.post('/register', async (req, res) => {
     const checkEmailQuery = 'SELECT * FROM users WHERE email = ?';
     db.query(checkEmailQuery, [email], async (err, results) => {
         if (err) {
-            return res.status(500).send('Error checking email');
+            return res.status(500).send({
+                status: 500,
+                message: 'Error checking email' + err
+            });
         }
 
         if (results.length > 0) {
-            return res.status(400).send('Email already exists');
+            return res.status(400).send({
+                status: 400,
+                message: 'Email already registered'
+            });
         }
 
         const hashedPassword = await bcrypt.hash(password, 10);
         const insertQuery = 'INSERT INTO users (email, password, username, student_id, first_name, last_name) VALUES (?, ?, ?, ?, ?, ?)';
         db.query(insertQuery, [email, hashedPassword, username, studenID, firstname, lastname], (err, result) => {
             if (err) {
-                return res.status(500).send('Error registering user' + err);
+                return res.status(500).send({
+                    status: 500,
+                    message: 'Error registering user' + err
+                });
             }
 
             res.send({
-                status:200,
-                data:"User registered successfully"
+                status: 200,
+                data: "User registered successfully"
             });
         });
     });
@@ -153,7 +164,7 @@ app.put('/editprofile', (req, res) => {
         }
 
         res.status(200).send({
-            status:200,
+            status: 200,
             data: "Update complete",
             user: email
         });
@@ -274,7 +285,7 @@ app.post('/api/auth/google', async (req, res) => {
         const payload = ticket.getPayload();
         console.log(payload);
         const email = payload.email;
-     
+
 
         if (email.endsWith('@rsu.ac.th')) {
             const query = 'SELECT * FROM users WHERE email = ?';
@@ -287,7 +298,7 @@ app.post('/api/auth/google', async (req, res) => {
                     let img = "https://i.pinimg.com/736x/b9/c4/7e/b9c47ef70bff06613d397abfce02c6e7.jpg"
                     const username = email.split('@')[0].replace('.', '');
                     const insertQuery = 'INSERT INTO users (email, username, first_name, last_name, photo) VALUES (?, ?, ?, ?, ?)';
-                    db.query(insertQuery, [email, username, payload.given_name, payload.family_name,img], (err, result) => {
+                    db.query(insertQuery, [email, username, payload.given_name, payload.family_name, img], (err, result) => {
                         if (err) {
                             return res.status(500).json({ message: 'Error saving user', error: err.message });
                         }
@@ -300,20 +311,23 @@ app.post('/api/auth/google', async (req, res) => {
                         process.env.JWT_SECRET,
                         { expiresIn: '1h' }
                     );
-                    res.json({
-                        status:200,
+                    res.status(200).json({
+                        status: 200,
                         user_id: user.user_id,
                         email: user.email,
                         role: user.role,
                         token,
                         message: 'Login successful'
                     });
-                    
-                   
+
+
                 }
             });
         } else {
-            res.status(403).json({ message: 'Invalid email domain' });
+            res.status(403).json({
+                status: 403,
+                message: 'Invalid email domain'
+            });
         }
     } catch (error) {
         res.status(401).json({ message: 'Invalid token', error: error.message });
@@ -324,12 +338,18 @@ app.post('/api/auth/google', async (req, res) => {
 app.post('/login/email', async (req, res) => {
     const { email, password } = req.body;
     if (!email || !password) {
-        return res.status(400).send('Email and password are required');
+        return res.status(400).send({
+            status: 400,
+            message: 'All fields are required'
+        });
     }
 
     const emailDomain = email.split('@')[1];
     if (emailDomain !== 'rsu.ac.th') {
-        return res.status(401).send('Invalid email domain. Please use an RSU email.');
+        return res.status(403).send({
+            status: 403,
+            message: 'Invalid email domain. Please use an RSU email.'
+        });
     }
 
     const query = 'SELECT * FROM users WHERE email = ?';
@@ -339,7 +359,10 @@ app.post('/login/email', async (req, res) => {
         }
 
         if (results.length === 0) {
-            return res.status(401).send('Invalid email or password' );
+            return res.status(401).send({
+                status: 401,
+                message: 'Invalid email or password'
+            });
         }
 
         const user = results[0];
@@ -361,10 +384,16 @@ app.post('/login/email', async (req, res) => {
                     token,
                 });
             } else {
-                res.status(401).send('Invalid email or password');
+                res.status(401).send({
+                    status: 401,
+                    message: 'Invalid email or password'
+                });
             }
         } catch (error) {
-            res.status(500).send('Error processing login' + error);
+            res.status(500).send({
+                status: 500,
+                message: 'Error processing login' + error
+            });
         }
     });
 });
@@ -427,45 +456,164 @@ app.get('/reservations/day/:day', (req, res) => {
         }
 
         if (results.length === 0) {
-            return res.status(404).send('No reservations found');
+            return res.status(200).send({
+                status: 404,
+                data: "No reservations found"
+            });
         }
 
         res.send(results);
     });
 });
 
-//route สำหรับการจองโต๊ะ
-app.post('/reservations', (req, res) => {
-    const { user_id, table_id, reservation_date, starttime, endtime ,roomid} = req.body;
-
-    if (!user_id || !table_id || !reservation_date || !starttime || !endtime || !roomid) {
-        return res.status(400).send('All fields are required');
+// กำหนดข้อมูลการตั้งค่าอีเมล (SMTP server)
+const transporter = nodemailer.createTransport({
+    service: 'gmail',  // ใช้บริการ Gmail หรือสามารถใช้บริการอื่นได้
+    auth: {
+        user: 'bookingwebapp.64@gmail.com',  // อีเมลของคุณ
+        pass: 'ycle pnsn ntxk aspl'    // รหัสผ่านของอีเมล
     }
+});
 
-    const checkTableQuery = 'SELECT * FROM tables WHERE table_id = ?';
-    db.query(checkTableQuery, [table_id], (err, results) => {
-        if (err) {
-            return res.status(500).send('Error checking table');
+
+app.post('/reservations', (req, res) => {
+    try {
+        const { user_id, table_id, reservation_date, starttime, endtime, roomid } = req.body;
+
+        if (!user_id || !table_id || !reservation_date || !starttime || !endtime || !roomid) {
+            return res.status(400).send('All fields are required');
         }
 
-        if (results.length === 0) {
-            return res.status(404).send('Table not found');
-        }
-
-        const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to,room_id) VALUES (?, ?, ?, ?, ?, ?)';
-        db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
+        const checkTableQuery = 'SELECT * FROM tables WHERE table_id = ?';
+        db.query(checkTableQuery, [table_id], (err, results) => {
             if (err) {
-                return res.status(500).send('Error making reservation' + err);
+                return res.status(500).send({ message: 'Error checking table', error: err });
             }
 
-            res.send({
-                status:200,
-                data:"Reservation made successfully"
-            });
+            if (results.length === 0) {
+                return res.status(404).send('Table not found');
+            }
 
-      
+            const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to, room_id) VALUES (?, ?, ?, ?, ?, ?)';
+            db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
+                if (err) {
+                    return res.status(500).send('Error making reservation' + err);
+                }
+
+                // ฟังก์ชันการส่งอีเมล
+                let showmail = null
+                const emailQuery = 'SELECT email FROM users WHERE user_id = ?'; // สมมุติว่ามีตาราง users เก็บข้อมูลอีเมลของผู้ใช้
+                db.query(emailQuery, [user_id], (err, userResult) => {
+                    if (err || userResult.length === 0) {
+                        return res.status(500).send('Error fetching user email');
+                    }
+
+                    const userEmail = userResult[0].email;
+                    showmail = userEmail
+                    console.log('Sending email to:', userEmail);
+
+                    const mailOptions = {
+                        from: 'BookingWebApp.64@gmail.com',  // อีเมลของคุณ
+                        to: userEmail,  // อีเมลของผู้ใช้
+                        subject: 'Reservation Confirmation',
+                        html: `
+                        <html>
+                        <head>
+                            <style>
+                                body {
+                                    font-family: Arial, sans-serif;
+                                    background-color: #f7f7f7;
+                                    color: #333;
+                                    margin: 0;
+                                    padding: 0;
+                                }
+                                .container {
+                                    width: 100%;
+                                    max-width: 600px;
+                                    margin: 20px auto;
+                                    background-color: #fff;
+                                    border-radius: 8px;
+                                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                                    padding: 20px;
+                                }
+                                h1 {
+                                    color: #d32f2f;
+                                    font-size: 24px;
+                                    text-align: center;
+                                }
+                                p {
+                                    font-size: 16px;
+                                    line-height: 1.5;
+                                }
+                                .details {
+                                    margin-top: 20px;
+                                    background-color: #f5f5f5;
+                                    border-left: 4px solid #80ff00;
+                                    padding: 15px;
+                                }
+                                .details p {
+                                    margin: 5px 0;
+                                }
+                                .footer {
+                                    text-align: center;
+                                    font-size: 14px;
+                                    margin-top: 20px;
+                                    color: #777;
+                                }
+                                .footer a {
+                                    color: #d32f2f;
+                                    text-decoration: none;
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="container">
+                                <h1>Reservation Confirmation</h1>
+                                <p>Dear User,</p>
+                                <p>Thank you for your reservation. Please find the details below:</p>
+                                
+                                <div class="details">
+                                    <p><strong>Table ID:</strong> ${table_id}</p>
+                                    <p><strong>Reservation Date:</strong> ${reservation_date}</p>
+                                    <p><strong>Time:</strong> ${starttime} to ${endtime}</p>
+                                    <p><strong>Room:</strong> ${roomid}</p>
+                                </div>
+                                
+                                <p>If you have any inquiries, please contact us at <strong>bookingwebapp.64@gmail.com</strong>.</p>
+                                <p>Thank you for choosing our service!</p>
+                    
+                                <div class="footer">
+                                    <p>&copy; 2024 Booking Web App. All rights reserved.</p>
+                                </div>
+                            </div>
+                        </body>
+                        </html>
+                        `
+                    };
+                    
+                    
+
+                    transporter.sendMail(mailOptions, (err, info) => {
+                        if (err) {
+                            console.log('Error sending email:', err);
+                            return res.status(500).send('Error sending confirmation email');
+                        }
+                        console.log('Email sent: ' + info.response);
+                    });
+                });
+
+                res.send({
+                    status: 200,
+                    data: "Reservation successful",
+                });
+            });
         });
-    });
+    } catch (error) {
+        res.status(500).send({
+            status: 500,
+            message: 'Error making reservation' + error
+        });
+    }
 });
 
 
@@ -478,8 +626,8 @@ app.get('/tables', (req, res) => {
             return res.status(500).send('Error querying tables');
         }
         res.send({
-            status:200,
-            data:results
+            status: 200,
+            data: results
         });
     });
 });
@@ -495,7 +643,9 @@ app.get('/availability', (req, res) => {
         }
         res.send(results);
     });
-}); 
+});
+
+
 
 
 
@@ -510,12 +660,7 @@ app.use((err, req, res, next) => {
     res.status(500).send('Something broke!' + err.message);
 });
 
-// CORS and COOP/COEP settings
-app.use(cors({
-    origin: 'http://localhost:5173', // URL ของ frontend
-    methods: 'GET,POST',
-    allowedHeaders: 'Content-Type,Authorization'
-}));
+
 
 app.use(cors({
     origin: '*', // หรือระบุโดเมนที่อนุญาต
@@ -524,12 +669,6 @@ app.use(cors({
 }));
 
 
-// ตั้งค่า COOP และ COEP
-app.use((req, res, next) => {
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
-    res.setHeader('Cross-Origin-Embedder-Policy', 'require-corp');
-    next();
-});
 
 // เริ่มต้นเซิร์ฟเวอร์
 app.listen(process.env.PORT || PORT, () => {
