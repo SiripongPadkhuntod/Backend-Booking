@@ -470,10 +470,12 @@ app.get('/reservations/day/:day', (req, res) => {
 const transporter = nodemailer.createTransport({
     service: 'gmail',  // ใช้บริการ Gmail หรือสามารถใช้บริการอื่นได้
     auth: {
-        user: 'bookingwebapp.64@gmail.com',  // อีเมลของคุณ
-        pass: 'ycle pnsn ntxk aspl'    // รหัสผ่านของอีเมล
+        user: process.env.EMAIL_USER, // อีเมลของผู้ส่ง
+        pass: process.env.EMAIL_PASSWORD // รหัสผ่านอีเมลของผู้ส่ง
     }
 });
+
+
 
 
 app.post('/reservations', (req, res) => {
@@ -494,117 +496,182 @@ app.post('/reservations', (req, res) => {
                 return res.status(404).send('Table not found');
             }
 
-            const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to, room_id) VALUES (?, ?, ?, ?, ?, ?)';
-            db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
-                if (err) {
-                    return res.status(500).send('Error making reservation' + err);
+            // Check for conflicting reservations
+            const conflictQuery = `
+                SELECT * FROM reservations 
+                WHERE table_id = ? 
+                AND reservation_date = ? 
+                AND (
+                    (reservation_time_from < ? AND reservation_time_to > ?) OR
+                    (reservation_time_from < ? AND reservation_time_to > ?) OR
+                    (reservation_time_from >= ? AND reservation_time_to <= ?)
+                )
+            `;
+
+            db.query(conflictQuery, [
+                table_id, 
+                reservation_date, 
+                starttime, starttime,  // Check if new reservation start is within existing reservation
+                endtime, endtime,      // Check if new reservation end is within existing reservation
+                starttime, endtime     // Check if new reservation completely contains an existing reservation
+            ], (conflictErr, conflictResults) => {
+                if (conflictErr) {
+                    return res.status(500).send({ message: 'Error checking reservation conflicts', error: conflictErr });
                 }
 
-                // ฟังก์ชันการส่งอีเมล
-                let showmail = null
-                const emailQuery = 'SELECT email FROM users WHERE user_id = ?'; // สมมุติว่ามีตาราง users เก็บข้อมูลอีเมลของผู้ใช้
-                db.query(emailQuery, [user_id], (err, userResult) => {
-                    if (err || userResult.length === 0) {
-                        return res.status(500).send('Error fetching user email');
+                // If there are any conflicting reservations, reject the new reservation
+                if (conflictResults.length > 0) {
+                    return res.status(409).send({
+                        status: 409,
+                        message: 'This time slot is already booked for the selected table',
+                        data: conflictResults
+                    });
+                }
+
+                // If no conflicts, proceed with reservation
+                const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to, room_id) VALUES (?, ?, ?, ?, ?, ?)';
+                db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
+                    if (err) {
+                        return res.status(500).send('Error making reservation' + err);
                     }
 
-                    const userEmail = userResult[0].email;
-                    showmail = userEmail
-                    console.log('Sending email to:', userEmail);
-
-                    const mailOptions = {
-                        from: 'BookingWebApp.64@gmail.com',  // อีเมลของคุณ
-                        to: userEmail,  // อีเมลของผู้ใช้
-                        subject: 'Reservation Confirmation',
-                        html: `
-                        <html>
-                        <head>
-                            <style>
-                                body {
-                                    font-family: Arial, sans-serif;
-                                    background-color: #f7f7f7;
-                                    color: #333;
-                                    margin: 0;
-                                    padding: 0;
-                                }
-                                .container {
-                                    width: 100%;
-                                    max-width: 600px;
-                                    margin: 20px auto;
-                                    background-color: #fff;
-                                    border-radius: 8px;
-                                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-                                    padding: 20px;
-                                }
-                                h1 {
-                                    color: #d32f2f;
-                                    font-size: 24px;
-                                    text-align: center;
-                                }
-                                p {
-                                    font-size: 16px;
-                                    line-height: 1.5;
-                                }
-                                .details {
-                                    margin-top: 20px;
-                                    background-color: #f5f5f5;
-                                    border-left: 4px solid #80ff00;
-                                    padding: 15px;
-                                }
-                                .details p {
-                                    margin: 5px 0;
-                                }
-                                .footer {
-                                    text-align: center;
-                                    font-size: 14px;
-                                    margin-top: 20px;
-                                    color: #777;
-                                }
-                                .footer a {
-                                    color: #d32f2f;
-                                    text-decoration: none;
-                                }
-                            </style>
-                        </head>
-                        <body>
-                            <div class="container">
-                                <h1>Reservation Confirmation</h1>
-                                <p>Dear User,</p>
-                                <p>Thank you for your reservation. Please find the details below:</p>
-                                
-                                <div class="details">
-                                    <p><strong>Table ID:</strong> ${table_id}</p>
-                                    <p><strong>Reservation Date:</strong> ${reservation_date}</p>
-                                    <p><strong>Time:</strong> ${starttime} to ${endtime}</p>
-                                    <p><strong>Room:</strong> ${roomid}</p>
-                                </div>
-                                
-                                <p>If you have any inquiries, please contact us at <strong>bookingwebapp.64@gmail.com</strong>.</p>
-                                <p>Thank you for choosing our service!</p>
-                    
-                                <div class="footer">
-                                    <p>&copy; 2024 Booking Web App. All rights reserved.</p>
-                                </div>
-                            </div>
-                        </body>
-                        </html>
-                        `
-                    };
-                    
-                    
-
-                    transporter.sendMail(mailOptions, (err, info) => {
-                        if (err) {
-                            console.log('Error sending email:', err);
-                            return res.status(500).send('Error sending confirmation email');
+                    // Rest of the email sending code remains the same...
+                    let showmail = null
+                    const emailQuery = 'SELECT * FROM users WHERE user_id = ?';
+                    db.query(emailQuery, [user_id], (err, userResult) => {
+                        if (err || userResult.length === 0) {
+                            return res.status(500).send({
+                                status: 500,
+                                message: 'Error retrieving user email' + err
+                            });
                         }
-                        console.log('Email sent: ' + info.response);
-                    });
-                });
 
-                res.send({
-                    status: 200,
-                    data: "Reservation successful",
+                        console.log('userResult:', userResult);
+
+                        const userEmail = userResult[0].email;
+                        const userfullname = userResult[0].first_name + ' ' + userResult[0].last_name;
+                        showmail = userEmail
+                        console.log('Sending email to:', userEmail + ' ' + userfullname);
+
+                        // ... (rest of the email sending code remains unchanged)
+                        const mailOptions = {
+                            from: 'BookingWebApp.64@gmail.com',
+                            to: userEmail,
+                            subject: 'Reservation Confirmation - Booking Web App',
+                            html: `
+                            <!DOCTYPE html>
+                            <html lang="en">
+                            <head>
+                                <meta charset="UTF-8">
+                                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                                <title>Reservation Confirmation</title>
+                                <style>
+                                    @import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;700&display=swap');
+                                    
+                                    body {
+                                        font-family: 'Roboto', Arial, sans-serif;
+                                        background-color: #f4f4f4;
+                                        margin: 0;
+                                        padding: 0;
+                                        line-height: 1.6;
+                                        color: #333;
+                                    }
+                                    .email-container {
+                                        max-width: 600px;
+                                        margin: 20px auto;
+                                        background-color: #ffffff;
+                                        border-radius: 12px;
+                                        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+                                        overflow: hidden;
+                                    }
+                                    .email-header {
+                                        background-color: #2c3e50;
+                                        color: white;
+                                        text-align: center;
+                                        padding: 20px;
+                                    }
+                                    .email-header h1 {
+                                        margin: 0;
+                                        font-size: 24px;
+                                        font-weight: 300;
+                                        letter-spacing: 1px;
+                                    }
+                                    .email-body {
+                                        padding: 30px;
+                                    }
+                                    .reservation-details {
+                                        background-color: #ecf0f1;
+                                        border-left: 5px solid #3498db;
+                                        padding: 20px;
+                                        margin: 20px 0;
+                                        border-radius: 4px;
+                                    }
+                                    .reservation-details p {
+                                        margin: 10px 0;
+                                        font-size: 16px;
+                                    }
+                                    .email-footer {
+                                        background-color: #34495e;
+                                        color: white;
+                                        text-align: center;
+                                        padding: 15px;
+                                        font-size: 12px;
+                                    }
+                                    .contact-info {
+                                        color: #3498db;
+                                        font-weight: bold;
+                                    }
+                                </style>
+                            </head>
+                            <body>
+                                <div class="email-container">
+                                    <div class="email-header">
+                                        <h1>Reservation Confirmation</h1>
+                                    </div>
+                                    
+                                    <div class="email-body">
+                                        <p>Dear ${userfullname} Customer,</p>
+                                        
+                                        <p>We are pleased to confirm your reservation details:</p>
+                                        
+                                        <div class="reservation-details">
+                                            <p><strong>Table ID:</strong> ${table_id}</p>
+                                            <p><strong>Reservation Date:</strong> ${reservation_date}</p>
+                                            <p><strong>Time:</strong> ${starttime} - ${endtime}</p>
+                                            <p><strong>Room:</strong> ${roomid}</p>
+                                        </div>
+                                        
+                                        <p>If you have any questions or need to modify your reservation, please contact us at 
+                                            <span class="contact-info">bookingwebapp.64@gmail.com</span>.
+                                        </p>
+                                        
+                                        <p>Thank you for choosing our service. We look forward to serving you!</p>
+                                    </div>
+                                    
+                                    <div class="email-footer">
+                                        © 2024 Booking Web App. All Rights Reserved.
+                                    </div>
+                                </div>
+                            </body>
+                            </html>
+                            `
+                        };
+                        
+                        
+    
+                        transporter.sendMail(mailOptions, (err, info) => {
+                            if (err) {
+                                console.log('Error sending email:', err);
+                                return res.status(500).send('Error sending confirmation email');
+                            }
+                            console.log('Email sent: ' + info.response);
+                        });
+                    });
+
+                    res.send({
+                        status: 200,
+                        data: "Reservation successful",
+                    });
                 });
             });
         });
