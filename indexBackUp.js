@@ -71,12 +71,9 @@ db.connect((err) => {
 app.get('/', (req, res) => {
     res.send('Hello, Express! API Server is running by Stop');
 });
-app.post('/upload', upload.single('file'), (req, res) => {
-    // Check if a response has already been sent
-    if (req.headersSent) {
-        return; // Exit if headers have already been sent
-    }
 
+app.post('/upload', upload.single('file'), (req, res) => {
+    if (res.headersSent) return; // ป้องกันการส่ง response ซ้ำ
     if (req.file && req.body.email) {
         const img = req.file.filename;
         const email = req.body.email;
@@ -84,19 +81,27 @@ app.post('/upload', upload.single('file'), (req, res) => {
         const query = 'UPDATE users SET photo = ? WHERE email = ?';
         db.query(query, [img, email], (err, result) => {
             if (err) {
-                return res.status(500).json({ message: 'Error updating user: ' + err });
+                if (!res.headersSent) {
+                    return res.status(500).json({ message: 'Error updating user: ' + err });
+                }
             }
 
-            return res.status(200).json({
-                status: 200,
-                data: 'Update complete',
-                user: email
-            });
+            if (!res.headersSent) {
+                res.status(200).send({
+                    status: 200,
+                    data: 'Update complete',
+                    user: email
+                });
+            }
         });
     } else {
-        return res.status(400).json({ message: 'No file or email provided' });
+        if (!res.headersSent) {
+            res.status(400).json({ message: 'No file or email provided' });
+        }
     }
 });
+
+
 
 
 //Route Register 
@@ -204,22 +209,36 @@ app.get('/users/email/:email', (req, res) => {
 // Route สำหรับการจองโต๊ะ
 
 // Route สำหรับการยกเลิกการจอง
-app.put('/reservations/cancel', (req, res) => {
-    const { reservation_id } = req.body;
-    if (!reservation_id) {
-        return res.status(400).send('Reservation ID is required');
-    }
+app.delete('/reservations/:id', (req, res) => {
+    const reservationId = req.params.id;
 
-    const query = 'UPDATE reservations SET status = "cancelled" WHERE reservation_id = ?';
-    db.query(query, [reservation_id], (err, result) => {
+    const query = 'SELECT * FROM reservations WHERE reservation_id = ?';
+    db.query(query, [reservationId], (err, results) => {
         if (err) {
-            return res.status(500).send('Error cancelling reservation' + err);
+            console.error('Error querying reservation:', err);
+            return res.status(500).send('Error querying reservation');
         }
 
-        res.send({
-            status: 200,
-            data: "Reservation cancelled",
-            reservation_id: reservation_id
+        if (results.length === 0) {
+            return res.status(404).send('Reservation not found');
+        }
+
+        const deleteReservationQuery = 'DELETE FROM reservations WHERE reservation_id = ?';
+        db.query(deleteReservationQuery, [reservationId], (err) => {
+            if (err) {
+                console.error('Error deleting reservation:', err);
+                return res.status(500).send('Error deleting reservation');
+            }
+
+            const tableId = results[0].table_id;
+            const updateTableQuery = 'UPDATE tables SET status = "available" WHERE table_id = ?';
+            db.query(updateTableQuery, [tableId], (err) => {
+                if (err) {
+                    console.error('Error updating table status:', err);
+                    return res.status(500).send('Error updating table status');
+                }
+                res.send('Reservation cancelled successfully');
+            });
         });
     });
 });
@@ -275,7 +294,7 @@ app.post('/api/auth/google', async (req, res) => {
                 }
 
                 if (results.length === 0) {
-                    const img = payload.picture;
+                    const img = "https://i.pinimg.com/736x/b9/c4/7e/b9c47ef70bff06613d397abfce02c6e7.jpg";
                     const username = email.split('@')[0].replace('.', '');
                     const insertQuery = 'INSERT INTO users (email, username, first_name, last_name, photo) VALUES (?, ?, ?, ?, ?)';
                     db.query(insertQuery, [email, username, payload.given_name, payload.family_name, img], (err, result) => {
@@ -383,7 +402,7 @@ app.get('/reservations/all', (req, res) => {
     const query = `SELECT * FROM reservations 
                     JOIN tables ON reservations.table_id = tables.table_id
                     JOIN users ON reservations.user_id = users.user_id
-                    WHERE reservations.reservation_date >= CURDATE() AND reservations.status = "active"
+                    WHERE reservations.reservation_date >= CURDATE();
     `;
     db.query(query, (err, results) => {
         if (err) {
@@ -405,7 +424,7 @@ app.get('/reservations/:month', (req, res) => {
     const query = `SELECT * FROM reservations 
                     JOIN tables ON reservations.table_id = tables.table_id
                     JOIN users ON reservations.user_id = users.user_id
-                    WHERE DATE_FORMAT(reservations.reservation_date, '%Y-%m') = ? AND reservations.status = "active";
+                    WHERE DATE_FORMAT(reservations.reservation_date, '%Y-%m') = ?
     `;
     db.query(query, [month], (err, results) => {
         if (err) {
@@ -414,26 +433,20 @@ app.get('/reservations/:month', (req, res) => {
         }
 
         if (results.length === 0) {
-            return res.status(200).send({
-                status: 404,
-                data: "No reservations found"
-            });
+            return res.status(404).send('No reservations found');
         }
 
-        res.status(200).send({
-            status: 200,
-            data: results
-        });
+        res.send(results);
     });
 });
 
 //route สำหรับการดึงข้อมูลการจองจาก วัน
 app.get('/reservations/day/:day', (req, res) => {
     const { day } = req.params;
-    const query = `SELECT  table_number,reservation_time_from,reservation_time_to,first_name,last_name,reservation_date, tables.table_id, tables.room_id FROM reservations 
+    const query = `SELECT table_number,reservation_time_from,reservation_time_to,first_name,last_name,reservation_date FROM reservations 
                     JOIN tables ON reservations.table_id = tables.table_id
                     JOIN users ON reservations.user_id = users.user_id
-                    WHERE DATE(reservations.reservation_date) = ? AND reservations.status = "active";
+                    WHERE DATE(reservations.reservation_date) = ?
     `;
     db.query(query, [day], (err, results) => {
         if (err) {
@@ -466,7 +479,7 @@ const transporter = nodemailer.createTransport({
 
 app.post('/reservations', (req, res) => {
     try {
-        const { user_id, table_id, reservation_date, starttime, endtime,note, roomid } = req.body;
+        const { user_id, table_id, reservation_date, starttime, endtime, roomid } = req.body;
 
         if (!user_id || !table_id || !reservation_date || !starttime || !endtime || !roomid) {
             return res.status(400).send('All fields are required');
@@ -492,7 +505,6 @@ app.post('/reservations', (req, res) => {
                     (reservation_time_from < ? AND reservation_time_to > ?) OR
                     (reservation_time_from >= ? AND reservation_time_to <= ?)
                 )
-                AND status = 'active'
             `;
 
             db.query(conflictQuery, [
@@ -516,8 +528,8 @@ app.post('/reservations', (req, res) => {
                 }
 
                 // If no conflicts, proceed with reservation
-                const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to, room_id, note) VALUES (?, ?, ?, ?, ?, ?, ?)';
-                db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid, note], (err, result) => {
+                const insertQuery = 'INSERT INTO reservations (user_id, table_id, reservation_date, reservation_time_from, reservation_time_to, room_id) VALUES (?, ?, ?, ?, ?, ?)';
+                db.query(insertQuery, [user_id, table_id, reservation_date, starttime, endtime, roomid], (err, result) => {
                     if (err) {
                         return res.status(500).send('Error making reservation' + err);
                     }
@@ -702,76 +714,6 @@ app.get('/availability', (req, res) => {
             return res.status(500).send('Error querying availability');
         }
         res.send(results);
-    });
-});
-
-
-//route getall role
-app.get('/role', (req, res) => {
-    const query = 'SELECT * FROM role';
-    db.query(query, (err, results) => {
-        if (err) {
-            console.error('Error querying role:', err);
-            return res.status(500).send('Error querying role');
-        }
-        res.send(results);
-    });
-});
-
-
-//route setrole 
-app.put('/user/setrole', (req, res) => {
-    const { user_id, role } = req.body;
-    
-    // ตรวจสอบว่า role ที่ส่งมาเป็น 'admin' หรือ 'user'
-    if (!user_id || !role) {
-        return res.status(400).send('All fields are required');
-    }
-
-    const query = 'UPDATE users SET role = ? WHERE user_id = ?';
-    db.query(query, [role, user_id], (err, result) => {
-        if (err) {
-            return res.status(500).send('Error updating role' + err);
-        }
-
-        res.status(200).send({
-            status: 200,
-            data: "Update complete",
-            user: user_id
-        });
-    });
-});
-
-app.get('/get/roles', (req, res) => {
-    const query = "SHOW COLUMNS FROM users LIKE 'role'";
-    db.query(query, (err, result) => {
-        if (err) {
-            return res.status(500).send('Error fetching ENUM values' + err);
-        }
-        
-        // ดึงค่า ENUM จากผลลัพธ์
-        const enumValues = result[0].Type.match(/\(([^)]+)\)/)[1].split(',');
-        
-        res.status(200).send({
-            status: 200,
-            roles: enumValues
-        });
-    });
-});
-
-
-
-app.get('/user/role', (req, res) => {
-    const query = 'SELECT role,first_name,last_name,user_id FROM users';
-    db.query(query, (err, results) => {
-        if (err) {
-            console.error('Error querying users:', err);
-            return res.status(500).send('Error querying users');
-        }
-        res.status(200).send({
-            status: 200,
-            results: results
-        });
     });
 });
 
