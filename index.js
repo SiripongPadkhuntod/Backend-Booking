@@ -41,22 +41,18 @@ const storage = multer.diskStorage({
 
 const upload = multer({ storage: storage });
 
-
-
-
-app.use(cors()); // เปิดใช้งาน CORS
 app.use(express.json());
 
 
 
-// const db = mysql.createConnection(process.env.DATABASE_URL2);
-const db = mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-    port: process.env.DB_PORT
-});
+const db = mysql.createConnection(process.env.DATABASE_URL2);
+// const db = mysql.createConnection({
+//     host: process.env.DB_HOST,
+//     user: process.env.DB_USER,
+//     password: process.env.DB_PASSWORD,
+//     database: process.env.DB_NAME,
+//     port: process.env.DB_PORT
+// });
 
 db.connect((err) => {
     if (err) {
@@ -178,7 +174,7 @@ app.get('/users', (req, res) => {
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error querying users:', err);
-            return res.status(500).send('Error querying users');
+            return res.status(500).send('Error querying users ' + err);
         }
         res.send(results);
     });
