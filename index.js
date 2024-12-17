@@ -4,11 +4,7 @@ const bcrypt = require('bcrypt');
 const cors = require('cors'); // เพิ่ม CORS
 const app = express();
 require('dotenv').config();
-
 const jwt = require('jsonwebtoken');
-const multer = require('multer');
-const Path2D = require('path');
-const fs = require('fs');
 
 
 const { OAuth2Client } = require('google-auth-library');
@@ -59,19 +55,40 @@ db.connect((err) => {
 app.use(express.json());
 
 
-function executeQuery(query, params) {
-    return new Promise((resolve, reject) => {
-        db.query(query, params, (err, results) => {
-            if (err) return reject(err);
-            resolve(results);
-        });
-    });
-}
+
 
 
 // Route พื้นฐาน
 app.get('/', (req, res) => {
     res.send('Hello, Express! API Server is running by Stop');
+});
+
+const verifyToken = (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    if (!authHeader) {
+        return res.status(403).json({ status: 403, message: 'Token is required' });
+    }
+
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+        return res.status(403).json({ status: 403, message: 'Token is required' });
+    }
+
+    // ตรวจสอบความถูกต้องของ token
+    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(401).json({ status: 401, message: 'Invalid or expired token' });
+        }
+
+        // เพิ่มข้อมูล user ใน request เพื่อใช้งานใน Route อื่น
+        req.user = decoded;
+        next();
+    });
+};
+
+// Route สำหรับตรวจสอบ token
+app.post('/verifyToken', verifyToken, (req, res) => {
+    res.status(200).json({ status: 200, message: 'Token is valid', user: req.user });
 });
 
 app.post('/register', async (req, res) => {
@@ -113,8 +130,6 @@ app.post('/register', async (req, res) => {
         res.status(500).json({ status: 500, message: 'Error registering user', error: error.message });
     }
 });
-
-
 
 app.put('/editprofile', async (req, res) => {
     const { email, first_name, last_name, phonenumber, student_id, department } = req.body;
@@ -167,10 +182,6 @@ app.put('/editprofile', async (req, res) => {
     }
 });
 
-
-
-
-
 app.get('/users', async (req, res) => {
     try {
         let query = 'SELECT * FROM users'; // ดึงข้อมูลทั้งหมดจากฐานข้อมูล
@@ -221,7 +232,6 @@ app.get('/users', async (req, res) => {
     }
 });
 
-
 // Route สำหรับการยกเลิกการจอง
 app.put('/reservations/cancel', (req, res) => {
     const { reservation_id } = req.body;
@@ -230,7 +240,7 @@ app.put('/reservations/cancel', (req, res) => {
     }
 
     const query = 'UPDATE reservations SET status = "cancelled" WHERE reservation_id = ?';
-    db.query(query, [reservation_id], (err, result) => {
+    db.query(query, [reservation_id], (err) => {
         if (err) {
             return res.status(500).send('Error cancelling reservation' + err);
         }
@@ -242,41 +252,6 @@ app.put('/reservations/cancel', (req, res) => {
         });
     });
 });
-
-
-
-
-
-// Middleware สำหรับตรวจสอบ JWT
-const verifyToken = (req, res, next) => {
-    const authHeader = req.headers['authorization'];
-    if (!authHeader) {
-        return res.status(403).json({ status: 403, message: 'Token is required' });
-    }
-
-    const token = authHeader.split(' ')[1];
-    if (!token) {
-        return res.status(403).json({ status: 403, message: 'Token is required' });
-    }
-
-    // ตรวจสอบความถูกต้องของ token
-    jwt.verify(token, process.env.JWT_SECRET, (err, decoded) => {
-        if (err) {
-            return res.status(401).json({ status: 401, message: 'Invalid or expired token' });
-        }
-
-        // เพิ่มข้อมูล user ใน request เพื่อใช้งานใน Route อื่น
-        req.user = decoded;
-        next();
-    });
-};
-
-// Route สำหรับตรวจสอบ token
-app.post('/verifyToken', verifyToken, (req, res) => {
-    res.status(200).json({ status: 200, message: 'Token is valid', user: req.user });
-});
-
-
 
 app.post('/api/auth/google', async (req, res) => {
     const { token } = req.body;
@@ -335,7 +310,6 @@ app.post('/api/auth/google', async (req, res) => {
     }
 });
 
-
 // Route สำหรับการ setpassword
 app.put('/setpassword', async (req, res) => {
     const { email, password } = req.body;
@@ -349,7 +323,7 @@ app.put('/setpassword', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const query = 'UPDATE users SET password = ? WHERE email = ?';
-    db.query(query, [hashedPassword, email], (err, result) => {
+    db.query(query, [hashedPassword, email], (err) => {
         if (err) {
             return res.status(500).send('Error updating password' + err);
         }
@@ -360,8 +334,6 @@ app.put('/setpassword', async (req, res) => {
         });
     });
 });
-
-
 
 app.post('/login', async (req, res) => {
     const { email, username, password } = req.body;
@@ -399,8 +371,6 @@ app.post('/login', async (req, res) => {
         res.status(error.status || 500).json({ status: error.status || 500, message: error.message });
     }
 });
-
-
 
 app.get('/reservations', async (req, res) => {
     const { month, day } = req.query;
@@ -441,10 +411,6 @@ app.get('/reservations', async (req, res) => {
         });
     }
 });
-
-
-
-
 
 app.post('/reservations', async (req, res) => {
     try {
@@ -516,8 +482,6 @@ app.post('/reservations', async (req, res) => {
     }
 });
 
-
-
 //route สำหรับการดึงข้อมูลโต๊ะ 
 app.get('/tables', (req, res) => {
     const query = 'SELECT * FROM tables';
@@ -533,7 +497,6 @@ app.get('/tables', (req, res) => {
     });
 });
 
-
 //route SELECT * FROM `availability` 
 app.get('/availability', (req, res) => {
     const query = 'SELECT * FROM availability';
@@ -545,7 +508,6 @@ app.get('/availability', (req, res) => {
         res.send(results);
     });
 });
-
 
 //route getall role
 app.get('/role', (req, res) => {
@@ -559,7 +521,6 @@ app.get('/role', (req, res) => {
     });
 });
 
-
 //route setrole 
 app.put('/user/setrole', (req, res) => {
     const { user_id, role } = req.body;
@@ -570,7 +531,7 @@ app.put('/user/setrole', (req, res) => {
     }
 
     const query = 'UPDATE users SET role = ? WHERE user_id = ?';
-    db.query(query, [role, user_id], (err, result) => {
+    db.query(query, [role, user_id], (err) => {
         if (err) {
             return res.status(500).send('Error updating role' + err);
         }
@@ -600,8 +561,6 @@ app.get('/get/roles', (req, res) => {
     });
 });
 
-
-
 app.get('/user/role', (req, res) => {
     const query = 'SELECT role,first_name,last_name,user_id FROM users';
     db.query(query, (err, results) => {
@@ -615,7 +574,6 @@ app.get('/user/role', (req, res) => {
         });
     });
 });
-
 
 // Route สำหรับการตรวจสอบว่ามี password หรือยัง
 app.get('/checkpassword', async (req, res) => {
@@ -647,21 +605,16 @@ app.get('/checkpassword', async (req, res) => {
     }
 });
 
-
-
 // Middleware สำหรับจัดการข้อผิดพลาดทั่วไป
-app.use((err, req, res, next) => {
+app.use((err, req, res) => {
     console.error(err.stack);
     res.status(500).send('Something broke!' + err.message);
 });
-
 
 // เริ่มต้นเซิร์ฟเวอร์
 app.listen(process.env.PORT || PORT, () => {
     console.log(`Server is running `);
 });
-
-
 
 
 async function sendConfirmationEmail(email, fullname, tableId, date, startTime, endTime, roomId) {
@@ -777,8 +730,6 @@ async function sendConfirmationEmail(email, fullname, tableId, date, startTime, 
     });
 }
 
-
-
 async function loginUser(identifier, password, identifierType) {
     const query = identifierType === 'email' ? 'SELECT * FROM users WHERE email = ?' : 'SELECT * FROM users WHERE username = ?';
     const results = await executeQuery(query, [identifier]);
@@ -801,4 +752,13 @@ async function loginUser(identifier, password, identifierType) {
     );
 
     return { user, token };
+}
+
+function executeQuery(query, params) {
+    return new Promise((resolve, reject) => {
+        db.query(query, params, (err, results) => {
+            if (err) return reject(err);
+            resolve(results);
+        });
+    });
 }
