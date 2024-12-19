@@ -536,15 +536,29 @@ app.get('/tables', (req, res) => {
 
 //route SELECT * FROM `availability` 
 app.get('/availability', (req, res) => {
-    const query = 'SELECT * FROM availability';
+    const query = 'SELECT * FROM availability WHERE start_date >= NOW()'; // กรองเฉพาะ start_date ตั้งแต่ปัจจุบัน
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error querying availability:', err);
-            return res.status(500).send('Error querying availability');
+            return res.status(200).send({
+                status: 500,
+                message: 'Error querying availability'
+            });
         }
-        res.send(results);
+        if (results.length === 0) {
+            return res.status(200).send({
+                status: 404,
+                message: 'No availability found'
+            });
+        }
+        res.send({
+            status: 200,
+            data: results
+        });
     });
 });
+
+
 
 
 //route getall role
@@ -553,7 +567,10 @@ app.get('/role', (req, res) => {
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error querying role:', err);
-            return res.status(500).send('Error querying role');
+            return res.status(200).send({
+                status: 500,
+                message: 'Error querying role'
+            });
         }
         res.send(results);
     });
@@ -607,7 +624,10 @@ app.get('/user/role', (req, res) => {
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error querying users:', err);
-            return res.status(500).send('Error querying users');
+            return res.status(200).send({
+                status: 500,
+                message: 'Error querying users'
+            });
         }
         res.status(200).send({
             status: 200,
