@@ -10,6 +10,7 @@ const jwt = require('jsonwebtoken');
 const { OAuth2Client } = require('google-auth-library');
 const nodemailer = require('nodemailer');
 const { type } = require('os');
+const { console } = require('inspector');
 const PORT = 3000;
 
 
@@ -170,12 +171,30 @@ app.put('/editprofile', async (req, res) => {
             return res.status(404).json({ status: 404, message: 'User not found' });
         }
 
-        // Success response
-        res.status(200).json({
-            status: 200,
-            message: 'Update complete',
-            user: email,
+        //add to log
+        const logquery = 'INSERT INTO logs (user_id , action , description) VALUES (?, ?,?)';
+        let description = 'User update profile for ' + email;
+
+        const userdata = await executeQuery('SELECT * FROM users WHERE email = ?', [email]);
+        const user = userdata[0];
+        db.query(logquery, [user.user_id, 'update profile', description], (err) => {
+            if (err) {
+                return res.status(500).send('Error updating user' + err);
+            }
+
+            res.send({
+                status: 200,
+                data: "Update complete",
+                user: email
+            });
         });
+
+        // Success response
+        // res.status(200).json({
+        //     status: 200,
+        //     message: 'Update complete',
+        //     user: email,
+        // });
     } catch (error) {
         console.error('Error updating user:', error);
         res.status(500).json({ status: 500, message: 'Error updating user', error: error.message });
@@ -234,7 +253,7 @@ app.get('/users', async (req, res) => {
 
 // Route สำหรับการยกเลิกการจอง
 app.put('/reservations/cancel', (req, res) => {
-    const { reservation_id } = req.body;
+    const { reservation_id , userid } = req.body;
     if (!reservation_id) {
         return res.status(400).send('Reservation ID is required');
     }
@@ -245,11 +264,26 @@ app.put('/reservations/cancel', (req, res) => {
             return res.status(500).send('Error cancelling reservation' + err);
         }
 
-        res.send({
-            status: 200,
-            data: "Reservation cancelled",
-            reservation_id: reservation_id
+        //add to log
+        const logquery = 'INSERT INTO logs (user_id , action , description,reservation_id) VALUES (?, ?,?,?)';
+        let description = 'User cancel reservation for ' + reservation_id;
+        db.query(logquery, [userid, 'cancel reservation', description ,reservation_id ], (err) => {
+            if (err) {
+                return res.status(500).send('Error updating user' + err);
+            }
+
+            res.send({
+                status: 200,
+                data: "Reservation cancelled",
+                reservation_id: reservation_id
+            });
         });
+
+        // res.send({
+        //     status: 200,
+        //     data: "Reservation cancelled",
+        //     reservation_id: reservation_id
+        // });
     });
 });
 
@@ -285,7 +319,24 @@ app.post('/api/auth/google', async (req, res) => {
             `;
             await executeQuery(insertQuery, [email, username, payload.given_name, payload.family_name, img]);
 
-            return res.status(200).json({ message: 'User created and login successful' });
+            //add to log
+            const userdata = await executeQuery('SELECT * FROM users WHERE email = ?', [email]);
+            const user = userdata[0];
+            const logquery = 'INSERT INTO logs (user_id , action , description) VALUES (?, ?,?)';
+            let description = 'User created by google for ' + email;
+            db.query(logquery, [user.user_id, 'create user', description], (err) => {
+                if (err) {
+                    return res.status(500).send('Error updating user' + err);
+                }
+
+                // res.send({
+                //     status: 200,
+                //     data: "User created successfully",
+                //     user: email
+                // });
+            });
+
+            // return res.status(200).json({ message: 'User created and login successful' });
         }
 
         // Generate JWT token for existing user
@@ -323,15 +374,28 @@ app.put('/setpassword', async (req, res) => {
 
     const hashedPassword = await bcrypt.hash(password, 10);
     const query = 'UPDATE users SET password = ? WHERE email = ?';
-    db.query(query, [hashedPassword, email], (err) => {
+    db.query(query, [hashedPassword, email], async (err) => {
         if (err) {
             return res.status(500).send('Error updating password' + err);
         }
 
-        res.send({
-            status: 200,
-            data: "Password updated successfully"
+        const userdata = await executeQuery('SELECT * FROM users WHERE email = ?', [email]);
+        const user = userdata[0];
+
+        //add to log
+        const logquery = 'INSERT INTO logs (user_id , action , description) VALUES (?, ?,?)';
+        let description = 'User set password for ' + email;
+        db.query(logquery, [user.user_id, 'set password',description], (err) => {
+            if (err) {
+                return res.status(500).send('Error updating password' + err);
+            }
+
+            res.send({
+                status: 200,
+                data: "Password updated successfully"
+            });
         });
+
     });
 });
 
@@ -393,12 +457,12 @@ app.get('/reservations', async (req, res) => {
 
     try {
         const results = await executeQuery(query, params);
-        if (results.length === 0){
+        if (results.length === 0) {
             return res.status(200).send({
                 status: 404,
                 message: 'No reservations found',
             });
-        } 
+        }
         res.status(200).send({
             status: 200,
             data: results,
