@@ -52,11 +52,6 @@ app.use(express.json());
 
 
 
-
-
-// Middleware สำหรับอ่าน JSON จาก body request
-
-
 // Route พื้นฐาน
 app.get('/', (req, res) => {
     res.send('Hello, Express! API Server is running by Stop');
