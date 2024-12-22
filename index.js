@@ -585,12 +585,9 @@ app.get('/availability', (req, res) => {
     });
 });
 
-<<<<<<< HEAD
 
 
 
-=======
->>>>>>> 2e420206414fde6984d7b4153785c52b619d444d
 //route getall role
 app.get('/role', (req, res) => {
     const query = 'SELECT * FROM role';
